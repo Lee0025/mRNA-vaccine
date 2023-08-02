@@ -69,20 +69,26 @@ s <- ComBat(dat=Metacohort, batch=batch, mod=NULL, par.prior=TRUE,  prior.plots=
 save(s,file = 'noneBatch.Rdata')
 ###pca plot to see batch effects
 Metacohort <- na.omit(Metacohort)
-pcab <- prcomp(t(Metacohort[1:100,]),center = T, scale. = T)
+pcab <- prcomp(t(Metacohort[1:1000,]),center = T, scale. = T)
 pcab.data <- as.data.frame(pcab$x)
 platform <- c(rep('TCGA',1110),rep('METABRIC',1904))
-pcab.data <- cbind(platform,pcab.data)
+pcab.data <- cbind(platform,pcab.data) # Merge before
 library(ggplot2)
 library(ggprism)
 library(patchwork)
 p1 <- ggplot(pcab.data,aes(PC1,PC2,color=platform))+geom_point(size=0.3)+theme_prism()
 s <- na.omit(s)
-pcaa <- prcomp(t(s[1:100,]),center = T,scale. = T)
+pcaa <- prcomp(t(s[1:1000,]),center = T,scale. = T)
 pcaa.data <- as.data.frame(pcaa$x)
-pcaa.data <- cbind(platform,pcaa.data)
+pcaa.data <- cbind(platform,pcaa.data) # merge after
 p2 <- ggplot(pcaa.data,aes(PC1,PC2,color=platform))+geom_point(size=0.3)+theme_prism()
 p1+p2+plot_layout(ncol = 2,nrow = 2)
+# 3D PCA plot
+library(scatterplot3d)
+colors <- c(rep('red',1110),rep('green',1904))
+legends <- c(rep('TCGA-BRCA cohort',1110),rep('METABRIC cohort','1904'))
+p1 <- scatterplot3d(pcab.data[,2:4],pch = 16,color = colors,grid=TRUE, box=FALSE)
+p2 <- scatterplot3d(pcaa.data[,2:4],pch = 16,color = colors,grid=TRUE, box=FALSE)
 #--------------------------------------------------------------------------------------------------------------------------
 #load("/Users/llls2012163.com/R-scrpit/ImmuneFilither/TCGA/ICI/BRCA_estimate_socre.Rdata")########Now the old data were discarded
 #load("/Users/llls2012163.com/TCGA/TCGA_BRCA_FPKM/pcExpdata.Rdata")
@@ -287,7 +293,7 @@ ggsurvplot(fit,
   ggtheme = theme_prism(), # Change ggplot2 theme
   palette = c("red", "blue","green")
 )
-fit1 <- survfit(Surv(Day, statu) ~ IS, data = preLog[1:1069,])
+fit1 <- survfit(Surv(Day, statu) ~ IS, data = preLog[1:1069,])# Survival analysis TCGA-BRCA cohort
 ggsurvplot(fit1,
   pval = TRUE, conf.int = FALSE,
   risk.table = TRUE, # Add risk table
@@ -297,7 +303,7 @@ ggsurvplot(fit1,
   ggtheme = theme_prism(), # Change ggplot2 theme
   palette = c("red", "blue","green")
 )
-fit2 <- survfit(Surv(Day, statu) ~ IS, data = preLog[1070:nrow(preLog),])
+fit2 <- survfit(Surv(Day, statu) ~ IS, data = preLog[1070:nrow(preLog),])# Survival analysis METABRIC cohort
 ggsurvplot(fit2,
   pval = TRUE, conf.int = FALSE,
   risk.table = TRUE, # Add risk table
@@ -307,7 +313,29 @@ ggsurvplot(fit2,
   ggtheme = theme_prism(), # Change ggplot2 theme
   palette = c("red", "blue","green")
 )
+# RFS only see the METABRIC cohort, so we examine the relationship between RFS and IS only in METABRIC cohort.
+RFS <- Metc[,c(1,23,24)]
+IS <- `Immunecluster.k=2.consensusClass`[1111:nrow(`Immunecluster.k=2.consensusClass`),]
+PreLogRFS <- cbind(RFS,IS)
+statu <- as.data.frame(strsplit2(PreLogRFS$RFS_STATUS,':'))
+Day <- PreLogRFS$RFS_MONTHS*30
+PreLogRFS <- cbind(ID=PreLogRFS$PATIENT_ID,Day=Day,statu=statu$V1,IS=IS$V2)
+PreLogRFS <- as.data.frame(PreLogRFS)
+PreLogRFS$IS <- ifelse(PreLogRFS$IS=='1','IS1','IS2')
+PreLogRFS$Day <- as.numeric(PreLogRFS$Day)
+PreLogRFS$statu <- as.numeric(PreLogRFS$statu)
+fit3 <- survfit(Surv(Day, statu) ~ IS, data =PreLogRFS)
+ggsurvplot(fit3,
+  pval = TRUE, conf.int = FALSE,
+  risk.table = TRUE, # Add risk table
+  risk.table.col = "strata", # Change risk table color by groups
+  linetype = "strata", # Change line type by groups
+  surv.median.line = "hv", # Specify median survival
+  ggtheme = theme_prism(), # Change ggplot2 theme
+  palette = c("red", "blue","green")
+)
 save(preLog,file = 'preLogIS.Rdata')
+#-----------------------------------------------------
 #5 Relationships between IS and TNM stage.
 load("~/project2022/clinicTCGA.Rdata")
 load("~/project2022/preLogIS.Rdata")
@@ -914,8 +942,13 @@ for(i in cell){
 MetassgsvaPvalue <- cbind(cell=cell,pvalue=output)
 Fig7 <- list(ssgsvaTCGA=ssgsvaTCGA1,ssgsvaMeta=ssgsvaMeta1,Tcgapvalue=TCGAssgsvaPvalue,MetassgsvaPvalue=MetassgsvaPvalue)
 save(Fig7,file = 'Fig7.Rdata')
-######DDR tree
+
+
+
+#--------------------------------------------------------------------------------
+######DDR tree constructing immune landscape
 library(monocle)
+library(ggplot2)
 load("~/project2022/noneBatch.Rdata")
 load("~/project2022/ImmuenGeneList.Rdata")
 gene <- intersect(gene,rownames(s))
@@ -936,10 +969,19 @@ cds <- estimateDispersions(cds)
 cds <- reduceDimension(cds,max_components = 2,method='DDRTree')
 cds <- orderCells(cds)
 plot_cell_trajectory(cds = cds,color_by = "State")
-plot_cell_trajectory(cds = cds,color_by = "State")+# state 1 6
-  scale_color_manual(values = c('#FF6600','#778899','#778899','#778899','#778899','#33CCCC','#778899','#778899','#778899','#778899','#778899'))
-a <- cds@phenoData@data
-a1 <- a[a$State==1 | a$State==6| a$State==8,]
+a <- t(cds@reducedDimS)
+a <- as.data.frame(a)
+a$p <- ifelse(a$V1 < -10,1,ifelse(
+  a$V1>7,2,0
+))
+a1 <- cds@phenoData@data
+a1$p <- ifelse(a1$State==8,3,0)
+a1$p1 <- a$p
+a1$Cluster <- ifelse(a1$p1 >0,a1$p1,a1$p)
+a1$Cluster <- as.factor(a1$Cluster)
+cds@phenoData@data <- a1
+plot_cell_trajectory(cds = cds,color_by = "Cluster",cell_size = 1)+# 
+  scale_color_manual(values = c('#778899','#33CCCC','#FF6600','#9400D3'))
 TreatTCGAid <- function(x){
   library(limma)
   a <- strsplit2(x,'-')[,1:3]
@@ -947,25 +989,25 @@ TreatTCGAid <- function(x){
   c <- paste(b,'-',a[,3],sep = '')
   return(c)
 }
-a1$q <- 1:1372
-id <- a1$cell[1:524]
+a3 <- a2[!a2$Cluster==0,][,c(1,8)]
+a3$q <- 1:1354
+id <- a3$cell[1:507]
 id <- TreatTCGAid(id)
-id <- c(id,a1$cell[525:1372])
-a1$ID <- id
-a1 <- a1[!duplicated(a1$ID),]
-rownames(a1) <- a1$ID
+a3$id <- c(id,a3$cell[508:1354])
+a3 <- a3[!duplicated(a3$id),]
+rownames(a3) <- a3$id
 load("~/project2022/Figure4/preLogIS.Rdata")
-preLog1 <- preLog[a1$ID,]
+preLog1 <- preLog[a3$id,]
 preLog1 <- na.omit(preLog1)
-a1 <- a1[rownames(preLog1),]
-preLog1 <- cbind(ID=rownames(preLog1),statu=preLog1$statu,Day=preLog1$Day,IS=preLog1$IS,State=a1$State)
+a3 <- a3[rownames(preLog1),]
+preLog1 <- cbind(ID=rownames(preLog1),statu=preLog1$statu,Day=preLog1$Day,IS=preLog1$IS,Cluster=a3$Cluster)
 preLog1 <- as.data.frame(preLog1)
 preLog1$Day <- as.numeric(preLog1$Day)
 preLog1$statu <- as.numeric(preLog1$statu)
 library(survminer)
 library(survival)
 library(ggprism)
-fit <- survfit(Surv(Day, statu) ~ State, data = preLog1)
+fit <- survfit(Surv(Day, statu) ~ Cluster, data = preLog1)
 ggsurvplot(fit,
   pval = TRUE, conf.int = FALSE,
   risk.table = TRUE, # Add risk table
@@ -977,6 +1019,7 @@ ggsurvplot(fit,
 Fig8 <- list(cds=cds,log168=preLog1)
 save(Fig8,file = 'Fig8.Rdata')
 rm(list = ls())
+#--------------------------------------------------------------------------------------
 ### The IS subgroups indentification and wilicox test were used to compare the ICI density between different 
 # IS subgroups.
 load("~/project2022/Figure8/Fig8.Rdata")
@@ -1024,7 +1067,8 @@ IS2ssgsva<-tidyr::gather(
   key="cell",
   value="abundance",
   "Activated CD8 T cell":"Neutrophil"
-)##################重点代码
+)##################重点代码_______________________________________________
+
 p2 <- ggplot(data =IS2ssgsva ,mapping = aes(x = cell,y= abundance,fill=Cluster))+geom_boxplot()+
   theme_prism()+theme(axis.text.x = element_text(vjust =1,hjust = 1,angle = 45),
     legend.position = 'top')+scale_fill_manual(values = c('#00CCCC','#9966CC'))+
@@ -1220,6 +1264,7 @@ ggplot()+
     nudge_y = 0.1)+ 
   theme(axis.text.x = element_text(angle = 30, 
     vjust = 0.1))
+#-----------------------------------------------------------------------------------------------
 ###Now we perform the WGCNA to identify the immune gene co-expression modules of BRCA ---
 rm(list = ls())  
 options(stringsAsFactors = F)
@@ -1231,7 +1276,6 @@ library(tidyverse) # ggplot2 stringer dplyr tidyr readr purrr  tibble forcats
 library(data.table) #多核读取文件
 ### 启用WGCNA多核计算
 enableWGCNAThreads(nThreads = 0.75*parallel::detectCores()) 
-
 ################################# 0.输入数据准备 ################################
 ### 读取表达矩阵
 load("~/project2022/noneBatch.Rdata")
@@ -1311,6 +1355,12 @@ if(F){
   datTraits <- datTraits[keepSamples,]
   dim(datExpr0) 
 }
+##保存数据
+datExpr <- datExpr0
+nGenes <- ncol(datExpr)
+nSamples <- nrow(datExpr)
+save(nGenes,nSamples,datExpr,datTraits,file="step1_input.Rdata")
+
 
 ### 判断数据质量 : PCA进行分组查看
 rm(list = ls())  
@@ -1333,11 +1383,7 @@ pca <- fviz_pca_ind(dat.pca,
 pca
 ggsave(pca,filename= "step1_Sample PCA analysis.pdf", width = 8, height = 8)
 
-##保存数据
-datExpr <- datExpr0
-nGenes <- ncol(datExpr)
-nSamples <- nrow(datExpr)
-save(nGenes,nSamples,datExpr,datTraits,file="step1_input.Rdata")
+
 
 ############################### 2.挑选最佳阈值power ###################################
 rm(list = ls())  
@@ -1395,14 +1441,10 @@ if(is.na(power)){
 }
 
 save(sft, power, file = "step2_power_value.Rdata")
-
-
-
-
 ##################### 3.一步法构建加权共表达网络，识别基因模块 ####################
 load(file = "step1_input.Rdata")
 load(file = "step2_power_value.Rdata")
-if(T){
+if(F){
   net <- blockwiseModules(
     datExpr,
     power = power,
@@ -1430,9 +1472,8 @@ if(T){
   # 输出结果根据模块中基因数目的多少，降序排列，依次编号为 `1-最大模块数`。
   # **0 (grey)**表示**未**分入任何模块的基因。
 }
-
 ## 模块可视化，层级聚类树展示各个模块
-if(T){
+if(F){
   # Convert labels to colors for plotting
   moduleColors <- labels2colors(net$colors)
   table(moduleColors)
@@ -1445,10 +1486,8 @@ if(T){
   dev.off()
 }
 save(net, moduleColors, file = "step3_genes_modules.Rdata")
-
-
 #####################  分布法完成网络构建，一般不用 #################################
-if(F){
+if(T){
   ## 构建加权共表达网络分为两步：
   ## 1. 计算邻近值，也是就是两个基因在不同样品中表达量的表达相关系数(pearson correlation rho)，
   ## 2. 计算topology overlap similarity (TOM)。 用TOM表示两个基因在网络结构上的相似性，即两个基因如果具有相似的邻近基因，这两个基因更倾向于有相互作用。
@@ -1540,7 +1579,7 @@ load(file = "step2_power_value.Rdata")
 load(file = "step3_genes_modules.Rdata")
 
 ## 模块与表型的相关性热图
-if(F){
+if(T){
   datTraits$group <- as.factor(datTraits$group)
   design <- model.matrix(~0+datTraits$group)
   colnames(design) <- levels(datTraits$group) #get the group
@@ -1808,3 +1847,34 @@ outTab3 <- cbind(HR=round(summMuticox$coefficients[,'exp(coef)'],4),
 # were prognostic factors in the univariate cox regression. Only the age were the prognostic factor in the 
 # multivariate cox regression. So it seems that those results were unsuit to be demostrated in the paper.
 # We finally finished the study here. The last works were checked those results and prepare the manuscript.
+## Here we want to compare the 4 key mRNA expression levels in IS1 and IS2. So we only extracted those expression levels and 
+# using the graph pad to visulize and test those data.
+`Immunecluster.k=2.consensusClass` <- read.csv("~/project2022/Immunecluster/Immunecluster.k=2.consensusClass.csv", header=FALSE)
+load("~/project2022/noneBatch.Rdata")
+s <- as.data.frame(s)
+s <- s[c('SLC7A5','CHPF','CCNE1','CENPW'),]
+s <- t(s)
+s <- cbind(`Immunecluster.k=2.consensusClass`,s)
+s <- as.data.frame(s)
+s <- s[order(s$V2),]
+write.csv(s,file = 'keygeneexpression.csv')
+library(ggplot2)
+library(ggprism)
+library(tidyverse)
+s1<-tidyr::gather(
+  data=s,
+  key="Gene",
+  value="value",
+  SLC7A5:CENPW
+)##################重点代码
+colnames(s1) <- c('ID','IS',colnames(s1)[c(3,4)])
+s1$IS <- ifelse(s$V2==1,'IS1','IS2')
+p <- ggplot(data = s1,mapping = aes(x = Gene,y= value,fill=IS))+geom_boxplot()+
+  theme_prism()+theme(axis.text.x = element_text(vjust =1,hjust = 1,angle = 30),
+    legend.position = 'top')+scale_fill_manual(values = c('#87CEFA','#4682B4'))+
+  labs(x='',y='Expression value')
+p
+t.test(s[s$V2==1,3],s[s$V2==2,3])
+t.test(s[s$V2==1,4],s[s$V2==2,4])
+t.test(s[s$V2==1,5],s[s$V2==2,5])
+t.test(s[s$V2==1,6],s[s$V2==2,6])
